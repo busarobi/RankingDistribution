@@ -1,4 +1,4 @@
-from utils import normalizationMallows
+from trank import normalizationMallows
 import numpy as np
 import matplotlib.pyplot as plt
 

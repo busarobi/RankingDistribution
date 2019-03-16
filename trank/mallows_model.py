@@ -4,6 +4,7 @@ from ranking_utils import *
 import itertools
 from lehmer import int_from_perm, perm_from_int
 import math
+import matplotlib.pyplot as plt
 
 class Mallows(Model):
     def __init__(self, ranking, phi):
@@ -44,7 +45,7 @@ class Mallows(Model):
                 sample[o] = sample[o-1]
 
             # insert
-            sample[r] = model.ordering[i1]
+            sample[r] = self.ordering[i1]
         return sample
 
     def get_probability(self, perm):
@@ -60,8 +61,11 @@ class Mallows(Model):
         return dist
 
     def get_multinomial_distribution(self):
-        dist = np.zeros((self.order * (self.order-1)/2,))
-        
+        dist = np.zeros((self.order * (self.order-1)/2+1,))
+        for i1 in range(self.order*(self.order-1)/2+1):
+            nd = numberOfPermWithKInversion(self.order, i1)
+            # print("Number of inversion: %d, number of permuation: %d" % (i1, nd))
+            dist[i1] = (nd * np.power(self.phi, i1)) / self.normalization
         return dist
 
     def test_sampling(self):
@@ -83,9 +87,35 @@ class Mallows(Model):
 
 
 if __name__ == "__main__":
-    M = 4
-    model = Mallows( range(1,M+1), 0.1 )
-    sample = model.get_sample()
-    print(sample)
+    M = 5
+    phi1 = 0.1
+    phi2 = 0.1
 
-    model.test_sampling()
+    model = Mallows( range(1,M+1), phi1 )
+    dist = model.get_multinomial_distribution()
+    print(dist)
+    model2 = Mallows( range(M, 0, -1), phi2 )
+    dist2 = model2.get_multinomial_distribution()
+    print(dist2)
+    print( "Difference:")
+    print(dist - dist2)
+
+    chis = np.zeros((model.order*(model.order-1)/2+1,))
+    chis[0] = np.power(dist[0] - dist2[0],2) / dist2[0]
+    for i1 in range(1,model.order*(model.order-1)/2+1):
+        chis[i1] = chis[i1-1] + np.power(dist[i1] - dist2[i1],2) / dist2[i1]
+
+    idx = range(model.order*(model.order-1)/2+1)
+    plt.plot(idx, dist, label="Mallows model $\phi = %g$" % phi1)
+    plt.plot(idx, dist2, label="Mallows model $\phi = %g$" % phi2)
+    plt.plot(idx, np.abs(dist - dist2), label="Difference")
+    plt.plot(idx, chis, label="$\chi^2_q$")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+    # assert( np.sum(dist) != 1.0 )
+    # sample = model.get_sample()
+    # print(sample)
+    #
+    # model.test_sampling()
