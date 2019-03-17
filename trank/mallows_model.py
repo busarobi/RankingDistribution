@@ -18,7 +18,7 @@ class Mallows(Model):
 
         # spread
         self.phi = phi
-        self.theta = -np.log(phi)
+        self.theta = np.log(phi)
         self.order = len(self.central_ranking)
 
         # Repeated Insertion Sort based sampling
@@ -26,10 +26,32 @@ class Mallows(Model):
 
         for i1 in range(self.order):
             for i2 in range(i1, self.order):
-                self.RIMP[i1,i2] = np.power(self.phi, (i2 - i1)) * ((1 - self.phi) / (1 - np.power(self.phi, (i2+1))))
+                self.RIMP[i1][i2] = np.power(self.phi, (i2 - i1)) * ((1 - self.phi) / (1 - np.power(self.phi, (i2+1))))
 
         # normalization
         self.normalization = normalizationMallows(self.order, self.phi)
+
+    def compute_normalization(self):
+        ret_val = 1.0
+        for i1 in range(1, self.order):
+            tmp_sum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum += np.power(self.phi, i2)
+
+            ret_val *= tmp_sum
+        return ret_val
+
+    def expected_sufficient_stat(self):
+        ret_val = 0.0
+        for i1 in range(1, self.order):
+            tmp_sum_enum = 0.0
+            tmp_sum_denum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum_enum += (i2 * np.exp(self.theta * i2))
+                tmp_sum_denum += np.exp(self.theta * i2)
+
+            ret_val += (tmp_sum_enum / tmp_sum_denum)
+        return ret_val
 
     def get_sample(self):
         sample = np.zeros((self.order,), dtype=np.int32)
@@ -60,13 +82,13 @@ class Mallows(Model):
             dist[i1] = self.get_probability(perm)
         return dist
 
-    def get_multinomial_distribution(self):
-        dist = np.zeros((self.order * (self.order-1)/2+1,))
-        for i1 in range(self.order*(self.order-1)/2+1):
-            nd = numberOfPermWithKInversion(self.order, i1)
-            # print("Number of inversion: %d, number of permuation: %d" % (i1, nd))
-            dist[i1] = (nd * np.power(self.phi, i1)) / self.normalization
-        return dist
+    # def get_multinomial_distribution(self):
+    #     dist = np.zeros((self.order * (self.order-1)/2+1,))
+    #     for i1 in range(self.order*(self.order-1)/2+1):
+    #         nd = numberOfPermWithKInversion(self.order, i1)
+    #         # print("Number of inversion: %d, number of permuation: %d" % (i1, nd))
+    #         dist[i1] = (nd * np.power(self.phi, i1)) / self.normalization
+    #     return dist
 
     def test_sampling(self):
         freq = np.zeros((math.factorial(self.order),))
@@ -84,6 +106,9 @@ class Mallows(Model):
             perm = perm_from_int(L,i1)
             p = self.get_probability(perm)
             print(perm, p_hat[i1], p)
+
+    def get_normalization(self):
+        return self.normalization
 
 
 if __name__ == "__main__":

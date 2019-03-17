@@ -44,93 +44,19 @@ def order2ranking(order):
 
 
 def kendall_tau(ranking1, ranking2):
-    pairs = itertools.combinations(range(0, len(ranking1)), 2)
-
     distance = 0
-
-    for x, y in pairs:
+    for x, y in itertools.combinations(range(0, len(ranking1)), 2):
         a = ranking1[x] - ranking1[y]
         b = ranking2[x] - ranking2[y]
-
         # if discordant (different signs)
         if (a * b < 0):
             distance += 1
-
     return distance
 
-
-# Python3 program to find number of permutation
-# with K inversion using Memoization
-# method recursively calculates
-# permutation with K inversion
-# 2D array memo for stopping
-# solving same problem again
-#memo = [[0 for i in range(100)] for j in range(100)]
-def static_vars(**kwargs):
-    def decorate(func):
-        for k in kwargs:
-            setattr(func, k, kwargs[k])
-        return func
-    return decorate
-
-@static_vars(memo=[[0 for i in range(100)] for j in range(100)])
-def rec(N, K):
-
-    # Base cases
-    if (N == 0): return 0
-    if (K == 0): return 1
-
-    # If already solved then
-    # return result directly
-    if (rec.memo[N][K] != 0):
-        return rec.memo[N][K]
-
-    # Calling recursively all subproblem
-    # of permutation size N - 1
-    sum = 0
-    for i in range(K + 1):
-
-        # Call recursively only if
-        # total inversion to be made
-        # are less than size
-        if (i <= N - 1):
-            sum += rec(N - 1, K - i)
-
-    # store result into memo
-    rec.memo[N][K] = sum
-
-    return sum
-
-def numberOfPermWithKInversion(N, K):
-    rec(N, K)
-    if (K==0):
-        return 1
-    else:
-        return rec.memo[N][K]
+def kendall_tau_norm(ranking1, ranking2):
+     return kendall_tau(ranking1,ranking2) / (len(ranking1) * (len(ranking1)-1.0) /2.0 )
 
 
-def getNumberOfPermWithKInversionArray(N):
-    m = (N * (N - 1)) / 2 + 1
-    arr = np.zeros((m,))
-
-    fname = './trank/inversions/data_%d.txt'% N
-    exists = os.path.isfile(fname)
-    if exists:
-        with open(fname, 'r') as f:
-            for i, line in enumerate(f):
-                arr[i]=int(line)
-    else:
-        arr[0]=1
-        for i in xrange(1,m):
-            rec(N, i)
-            arr[i] = rec.memo[N][i]
-
-        with open(fname, 'w') as f:
-            for i in arr:
-                f.write("%g\n" % i)
-            f.close()
-
-    return arr
 
 
 def binarySearchMallows(M, s, lb, ub, err=10e-8):

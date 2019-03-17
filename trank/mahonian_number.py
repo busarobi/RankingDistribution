@@ -1,6 +1,8 @@
 import numpy as np
 import os
 import timeit
+from math import factorial
+from trank import *
 
 class Mahonian:
     def __init__(self, N):
@@ -11,7 +13,7 @@ class Mahonian:
     def set_params(self):
         self.m = (self.N * (self.N - 1)) / 2 + 1
         self.halfm = int(np.ceil(self.m/2.0))
-        self.arr = np.zeros((self.m,))
+        self.arr = [0 for i in range(self.m)]
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
         fname = dir_path + ('/inversions/data_%d.txt' % self.N)
@@ -69,7 +71,7 @@ class Mahonian:
 
         # store result into memo
         self.memo[N][K] = sum
-
+        self.memo[N][((N*(N-1))/2) - i]=self.memo[N][K]
         return sum
 
     def get(self, k):
@@ -82,8 +84,9 @@ class Mahonian:
         return self.arr
 
 if __name__ == "__main__":
+    samp_num = 10000
 
-    for i in xrange(2,24):
+    for i in xrange(4,20):
         start = timeit.default_timer()
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -95,11 +98,29 @@ if __name__ == "__main__":
         print( "------------ %d ---------" % i )
         mahonian = Mahonian(i)
 
-        print("%g" % mahonian.get(i-2))
-        print(["%g" % i for i in mahonian.getArray()] )
-
 
         stop = timeit.default_timer()
 
         print("Time: %g" % (stop - start))
 
+        #
+        print("%g" % mahonian.get(i-2))
+        print(["%g" % j for j in mahonian.getArray()] )
+        print( "%d %d" % (np.sum(mahonian.getArray()), factorial(i)))
+        assert(np.sum(mahonian.getArray() != factorial(i)))
+
+
+        phi = 0.2
+        pi0=range(1,i+1)
+        mallows = Mallows(pi0, phi)
+        s = 0.0
+        for i, v in enumerate(mahonian.getArray()):
+            prob = v * (np.power(phi,i) /mallows.get_normalization() ) # this is the probability that we see a rnaking with distance i
+            s += i * prob
+        print("Expected distance (Mahonian): %g" % (s))
+        print("Expected distance (log part): %g" % (mallows.expected_sufficient_stat()))
+
+        s = 0.0
+        for j in range(samp_num):
+            s += kendall_tau(pi0, mallows.get_sample())
+        print("Expected distance (sampling) : %g" % (s/samp_num))
