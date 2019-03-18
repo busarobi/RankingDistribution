@@ -3,3 +3,4 @@ from model import *
 from mallows_model import *
 from lehmer import *
 from mahonian_number import *
+from test_simple import *

@@ -22,6 +22,7 @@ class Partition:
         fname = dir_path + ('/partition/data_item_%d_sample_size_%d.txt' % (self.N, self.n))
         exists = os.path.isfile(fname)
         if exists:
+            self.arr = [0 for i in range(self.upperbound)]
             with open(fname, 'r') as f:
                 for i, line in enumerate(f):
                     self.arr[i] = int(line)
