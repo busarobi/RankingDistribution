@@ -31,6 +31,16 @@ def expectedSufficientStatMallows(M, phi):
         ret_val += (tmp_sum_enum/tmp_sum_denum)
     return ret_val
 
+# def expectedSufficientStatMallows(M, phi):
+#     theta = np.log(phi)
+#     ret_val=0.0
+#     for i1 in range(1,M):
+#         tmp_sum_enum = 0.0
+#         for i2 in range(1,i1+1):
+#             tmp_sum_enum += (i2*np.exp(theta*(i2-1)))
+#
+#         ret_val += tmp_sum_enum
+#     return ret_val
 
 # convert ordering to ranking for example the ordering is 3 4 2 6 1 5
 def order2ranking(order):
@@ -59,7 +69,7 @@ def kendall_tau_norm(ranking1, ranking2):
 
 
 
-def binarySearchMallows(M, s, lb, ub, err=10e-8):
+def binarySearchMallows(M, s, lb, ub, err=10e-7):
     phi_estimate = (lb+ub)/2.0
     v = expectedSufficientStatMallows(M, phi_estimate)
     if (np.abs(v-s)<err):

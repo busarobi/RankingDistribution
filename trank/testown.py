@@ -1,4 +1,4 @@
-class Test(object):
+class TestOwn(object):
     name = ""
     order = 0
 

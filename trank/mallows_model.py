@@ -10,6 +10,7 @@ class Mallows(Model):
     def __init__(self, ranking, phi):
         self.name = "Mallows"
         self.set_params(ranking, phi)
+        np.random.seed()
 
     def set_params(self, ranking, phi):
         # center ranking and ordering
@@ -18,7 +19,10 @@ class Mallows(Model):
 
         # spread
         self.phi = phi
-        self.theta = np.log(phi)
+        if (phi>0):
+            self.theta = np.log(phi)
+        else:
+            self.theta = np.inf
         self.order = len(self.central_ranking)
 
         # Repeated Insertion Sort based sampling
@@ -29,7 +33,7 @@ class Mallows(Model):
                 self.RIMP[i1][i2] = np.power(self.phi, (i2 - i1)) * ((1 - self.phi) / (1 - np.power(self.phi, (i2+1))))
 
         # normalization
-        self.normalization = normalizationMallows(self.order, self.phi)
+        self.set_normalization()
 
     def compute_normalization(self):
         ret_val = 1.0
@@ -40,6 +44,15 @@ class Mallows(Model):
 
             ret_val *= tmp_sum
         return ret_val
+
+    def set_normalization(self):
+        self.normalization = 1.0
+        for i1 in range(1, self.order):
+            tmp_sum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum += np.power(self.phi, i2)
+
+            self.normalization *= tmp_sum
 
     def expected_sufficient_stat(self):
         ret_val = 0.0
@@ -52,6 +65,32 @@ class Mallows(Model):
 
             ret_val += (tmp_sum_enum / tmp_sum_denum)
         return ret_val
+
+    # def expected_sufficient_stat(self):
+    #     ret_val = 0.0
+    #     for i1 in range(1, self.order):
+    #         tmp_sum_enum = 0.0
+    #         for i2 in range(1, i1 + 1):
+    #             tmp_sum_enum += (i2 * np.exp(self.theta * (i2-1)))
+    #
+    #
+    #         ret_val += tmp_sum_enum
+    #     return ret_val
+
+
+    # based on Fligner, there is some bug in this code
+    # def expected_sufficient_stat(self):
+    #     ret_val = 0.0
+    #     tmp_sum_enum = self.order * np.exp(self.theta)
+    #     tmp_sum_denum = 1.0 - np.exp(self.theta)
+    #     ret_val = (tmp_sum_enum / tmp_sum_denum)
+    #
+    #     for i2 in range(1, self.order + 1):
+    #         tmp_sum_enum = (i2 * np.exp(self.theta * i2))
+    #         tmp_sum_denum = (1.0-np.exp(self.theta * i2))
+    #
+    #         ret_val -= (tmp_sum_enum / tmp_sum_denum)
+    #     return ret_val
 
     def get_sample(self):
         sample = np.zeros((self.order,), dtype=np.int32)
