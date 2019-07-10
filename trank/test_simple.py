@@ -171,6 +171,24 @@ class SimpleFixedConfidence(TestOwn):
                 return -1
 
 
+class MallowsTest(TestOwn):
+    def __init__(self, pi_0, phi, alpha, sample_size):
+        self.order = len(pi_0)
+        self.alpha = alpha
+        self.sampe_size = sample_size
+
+        self.mallows = Mallows(pi_0, phi)
+
+    def test(self, data):
+        s = np.zeros((self.sampe_size,))
+        for i, r in enumerate(data):
+            s[i] = ranking_utils.kendall_tau(self.mallows.central_ranking, r)
+
+        statistic = np.average(s)
+        m = self.mallows.expected_sufficient_stat()
+        v = self.mallows.varainceSufficientStatMallows()
+
+
 if __name__ == "__main__":
     M =5
     test = SimpleFixedSample(range(1,M+1), 0.2, 0.05, 10)

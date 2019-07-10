@@ -5,7 +5,7 @@ import matplotlib.patches as mpatches
 
 
 def get_power_curve_fc(phi0, m, delta, epsilon0, epsilon, rep):
-    fname = "mallows/fc_phi0_%g_m_%d_delta_%g_eps0_%g_eps_%g_rep_%d_power" % (phi0, m, delta, epsilon0, epsilon, rep)
+    fname = "mallows_2/fc_phi0_%g_m_%d_delta_%g_eps0_%g_eps_%g_rep_%d_power" % (phi0, m, delta, epsilon0, epsilon, rep)
     fname = fname.replace(".","_") + ".csv"
 
     print("Load : %s" % (fname))
@@ -26,7 +26,7 @@ def get_power_curve_fc(phi0, m, delta, epsilon0, epsilon, rep):
 
 loopi = 1
 for phi0 in [0.1, 0.5, 0.7]:
-    m=50
+    m=15
     pi0 = range(1,m+1)
 
     delta = 0.05

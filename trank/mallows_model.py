@@ -66,6 +66,20 @@ class Mallows(Model):
             ret_val += (tmp_sum_enum / tmp_sum_denum)
         return ret_val
 
+    def varainceSufficientStatMallows(self):
+        ret_val = 0.0
+        for i1 in range(1, self.order):
+            tmp_sum_enum = 0.0
+            tmp_sum_denum = 0.0
+            second_der = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum_enum += (i2 * np.exp(self.theta * i2))
+                tmp_sum_denum += np.exp(self.theta * i2)
+                second_der += (np.exp(self.theta * i2)(1 + i2 * i2))
+
+            ret_val += ((tmp_sum_denum * second_der - tmp_sum_enum * tmp_sum_enum) / (tmp_sum_denum * tmp_sum_denum))
+        return ret_val
+
     # def expected_sufficient_stat(self):
     #     ret_val = 0.0
     #     for i1 in range(1, self.order):
