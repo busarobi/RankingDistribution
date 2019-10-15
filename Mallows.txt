@@ -1,0 +1,637 @@
+%matplotlib inline
+
+import re
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from datetime import datetime, date, timedelta
+import pyspark.sql.functions as func
+
+from plotly.offline import init_notebook_mode, iplot
+from plotly import graph_objs as go
+from datetime import datetime
+from plotly import tools
+init_notebook_mode(connected=True)
+
+spark
+
+import itertools
+import math
+
+# convert ordering to ranking for example the ordering is 3 4 2 6 1 5
+def order2ranking(order):
+    l = len(order)
+    ranking = np.zeros((l,))
+    for i in range(l):
+        o = order[i]
+        ranking[o-1] = i+1
+
+    return ranking
+
+
+def kendall_tau(ranking1, ranking2):
+    distance = 0
+    for x, y in itertools.combinations(range(0, len(ranking1)), 2):
+        a = ranking1[x] - ranking1[y]
+        b = ranking2[x] - ranking2[y]
+        # if discordant (different signs)
+        if (a * b < 0):
+            distance += 1
+    return distance
+
+def kendall_tau_norm(ranking1, ranking2):
+     return kendall_tau(ranking1,ranking2) / (len(ranking1) * (len(ranking1)-1.0) /2.0 )
+
+
+class Model(object):
+    name = ""
+    order = 0
+
+    def get_name(self):
+        return self.name
+
+    def get_sample(self):
+        return []
+
+    def get_order(self):
+        return self.order
+
+class Mallows(Model):
+    def __init__(self, ranking, phi):
+        self.name = "Mallows"
+        self.set_params(ranking, phi)
+        np.random.seed()
+
+    def set_params(self, ranking, phi):
+        # center ranking and ordering
+        self.central_ranking = ranking
+        self.ordering = order2ranking(ranking)
+
+        # spread
+        self.phi = phi
+        if (phi>0):
+            self.theta = np.log(phi)
+        else:
+            self.theta = np.inf
+        self.order = len(self.central_ranking)
+
+        # Repeated Insertion Sort based sampling
+        self.RIMP = np.zeros((self.order, self.order))
+
+        for i1 in range(self.order):
+            for i2 in range(i1, self.order):
+                self.RIMP[i1][i2] = np.power(self.phi, (i2 - i1)) * ((1 - self.phi) / (1 - np.power(self.phi, (i2+1))))
+
+        # normalization
+        self.set_normalization()
+
+    def compute_normalization(self):
+        ret_val = 1.0
+        for i1 in range(1, self.order):
+            tmp_sum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum += np.power(self.phi, i2)
+
+            ret_val *= tmp_sum
+        return ret_val
+
+    def set_normalization(self):
+        self.normalization = 1.0
+        for i1 in range(1, self.order):
+            tmp_sum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum += np.power(self.phi, i2)
+
+            self.normalization *= tmp_sum
+
+    def expected_sufficient_stat(self):
+        ret_val = 0.0
+        for i1 in range(1, self.order):
+            tmp_sum_enum = 0.0
+            tmp_sum_denum = 0.0
+            for i2 in range(0, i1 + 1):
+                tmp_sum_enum += (i2 * np.exp(self.theta * i2))
+                tmp_sum_denum += np.exp(self.theta * i2)
+
+            ret_val += (tmp_sum_enum / tmp_sum_denum)
+        return ret_val
+
+    # def expected_sufficient_stat(self):
+    #     ret_val = 0.0
+    #     for i1 in range(1, self.order):
+    #         tmp_sum_enum = 0.0
+    #         for i2 in range(1, i1 + 1):
+    #             tmp_sum_enum += (i2 * np.exp(self.theta * (i2-1)))
+    #
+    #
+    #         ret_val += tmp_sum_enum
+    #     return ret_val
+
+
+    # based on Fligner, there is some bug in this code
+    # def expected_sufficient_stat(self):
+    #     ret_val = 0.0
+    #     tmp_sum_enum = self.order * np.exp(self.theta)
+    #     tmp_sum_denum = 1.0 - np.exp(self.theta)
+    #     ret_val = (tmp_sum_enum / tmp_sum_denum)
+    #
+    #     for i2 in range(1, self.order + 1):
+    #         tmp_sum_enum = (i2 * np.exp(self.theta * i2))
+    #         tmp_sum_denum = (1.0-np.exp(self.theta * i2))
+    #
+    #         ret_val -= (tmp_sum_enum / tmp_sum_denum)
+    #     return ret_val
+
+    def get_sample(self):
+        sample = np.zeros((self.order,), dtype=np.int32)
+        sample[0] = self.ordering[0]
+        for i1 in range(1,self.order):
+            p = self.RIMP[0:(i1+1), i1]
+
+            # index to insert
+            r = np.nonzero(np.random.multinomial(1, p))[0][0]
+
+            # shift to the right
+            for o in range(i1,r,-1):
+                sample[o] = sample[o-1]
+
+            # insert
+            sample[r] = self.ordering[i1]
+        return sample
+
+    def get_probability(self, perm):
+        prob = np.power(self.phi, kendall_tau(self.central_ranking, perm))
+        return prob / self.normalization
+
+    def get_distribution(self):
+        dist = np.zeros((math.factorial(self.order),))
+        L = np.arange(1, self.order + 1)
+        for i1 in range(math.factorial(self.order)):
+            perm = perm_from_int(L,i1)
+            dist[i1] = self.get_probability(perm)
+        return dist
+
+    # def get_multinomial_distribution(self):
+    #     dist = np.zeros((self.order * (self.order-1)/2+1,))
+    #     for i1 in range(self.order*(self.order-1)/2+1):
+    #         nd = numberOfPermWithKInversion(self.order, i1)
+    #         # print("Number of inversion: %d, number of permuation: %d" % (i1, nd))
+    #         dist[i1] = (nd * np.power(self.phi, i1)) / self.normalization
+    #     return dist
+
+    def test_sampling(self):
+        freq = np.zeros((math.factorial(self.order),))
+        L = np.arange(1, self.order+1)
+        n = 100000
+
+        for i1 in range(n):
+            sample = self.get_sample()
+            idx = int_from_perm(L, sample)
+            freq[idx] += 1
+
+        p_hat = freq / float(n)
+
+        for i1 in range(math.factorial(self.order)):
+            perm = perm_from_int(L,i1)
+            p = self.get_probability(perm)
+            print(perm, p_hat[i1], p)
+
+    def get_normalization(self):
+        return self.normalization
+
+
+class TestOwn(object):
+    name = ""
+    order = 0
+
+    def get_name(self):
+        return self.name
+
+    def test(self, data):
+        return None
+
+    
+def expectedSufficientStatMallows(M, phi):
+    theta = np.log(phi)
+    ret_val=0.0
+    for i1 in range(1,M):
+        tmp_sum_enum = 0.0
+        tmp_sum_denum = 0.0
+        for i2 in range(0,i1+1):
+            tmp_sum_enum += (i2*np.exp(theta*i2))
+            tmp_sum_denum += np.exp(theta * i2)
+
+        ret_val += (tmp_sum_enum/tmp_sum_denum)
+    return ret_val
+    
+    
+def binarySearchMallows(M, s, lb, ub, err=10e-7):
+    phi_estimate = (lb+ub)/2.0
+    v = expectedSufficientStatMallows(M, phi_estimate)
+    if (np.abs(v-s)<err):
+        return phi_estimate
+    if (v<s):
+        return binarySearchMallows(M,s,phi_estimate,ub,err)
+    else:
+        return binarySearchMallows(M,s,lb,phi_estimate, err)
+
+def getMallowsParameterEstimator( M, stat ):
+    phi_estimate = binarySearchMallows(M, stat, 0.0, 1.0 )
+    return phi_estimate    
+    
+
+class SimpleFixedConfidence(TestOwn):
+    def __init__(self, pi_0, phi, delta, epsilon0, epsilon, debug = False): # delta is eqivalent to alpha in the fixed sample case
+        self.order = len(pi_0)
+        self.epsilon = epsilon
+        self.epsilon0 = epsilon0
+        self.delta = delta
+        self.pi_0 = pi_0
+        self.phi = phi
+        self.debug = debug
+
+    def get_sample_num(self):
+        return int(np.floor(self.order/np.power(self.epsilon0,2.0) * np.log(self.order/self.delta)))
+    
+    def test(self, stat):
+        phi_estimate = getMallowsParameterEstimator( self.order, stat )
+
+        if (self.debug):
+            print( "--> phi_0 -+eps: [%g, %g], phi estimate: %g" % (self.phi -self.epsilon0, self.phi +self.epsilon0, phi_estimate))
+
+        if (np.abs(phi_estimate-self.phi) < self.epsilon0):
+            if (self.debug):
+                print( "--> Accept")
+            return 0
+        else:
+            if (phi_estimate > self.phi + self.epsilon0):
+                threshold = (np.sqrt(self.order) / 4.0) * np.log(phi_estimate/(self.phi + self.epsilon0))
+                if (threshold>self.epsilon):
+                    if (self.debug):
+                        print("--> Reject (bigger), threshold: %g, epsilon: %g" % (threshold, self.epsilon))
+                    return 1
+                else:
+                    if (self.debug):
+                        print("--> No answer      , threshold: %g, epsilon: %g" % (threshold, self.epsilon))
+                    return -1
+
+            if (phi_estimate < self.phi - self.epsilon0):
+                threshold = (np.sqrt(self.order) / 4.0) * np.log((self.phi - self.epsilon0)/phi_estimate)
+                if (threshold>self.epsilon):
+                    if (self.debug):
+                        print("--> Reject (smaller), threshold: %g, epsilon: %g" % (threshold, self.epsilon))
+                    return 1
+                else:
+                    if (self.debug):
+                        print("--> No answer      , threshold: %g, epsilon: %g" % (threshold, self.epsilon))
+                return -1
+
+
+from pyspark.mllib.linalg import DenseVector
+from pyspark.mllib.random import RandomRDDs
+from pyspark.sql.types import *
+
+
+
+def getDFWithRandomRanking(num, pi0, phi, partitions = 10):
+    m = Mallows(pi0, phi)
+    def random_distance(): 
+        r = m.get_sample()
+        return kendall_tau(pi0, r)
+
+    udf_random_distance = func.udf(random_distance, IntegerType())
+
+    data  = RandomRDDs.uniformRDD(sc, num, numPartitions=partitions).map(lambda a : (a,)).toDF(['rand']).withColumn("distance", udf_random_distance()).select("distance")
+    return data
+
+
+
+def get_power(test, pi0, phi, repetitions, partitions):
+    rejection = np.zeros((repetitions,))
+    power = 0.0
+    noanswer = 0.0
+    
+    mult = 10
+    data= getDFWithRandomRanking(mult*test.get_sample_num(), pi0, phi, partitions)
+    data.write.mode("overwrite").save("/tmp/busafekete/mallows/dump/")
+    data = spark.read.parquet("/tmp/busafekete/mallows/dump/").cache()
+    
+    for l in range(repetitions):
+        ############ fixed confidence
+        stat = data.sample(fraction=1/mul).agg(func.avg("distance").alias("avg_dist")).collect()
+
+        rejection[l] = test.test(stat[0].avg_dist)
+        # print(l, rejection[l], stats[l])
+        if (rejection[l] > 0.0):
+            #
+            power+= 1.0
+        if (rejection[l] < 0.0):
+            noanswer += 1.0
+
+#     if (noanswer == repetitions):
+#         power = 0.0
+#     else:
+#         power = (power / (repetitions-noanswer))
+#     noanswer = (noanswer / repetitions)
+    power = (power / repetitions)
+    noanswer = (noanswer / repetitions)
+    #print("Power: %f" % power)
+    return power, noanswer
+
+def save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, rep):
+    fname = "mallows/fc_phi0_%g_m_%d_delta_%g_eps0_%g_eps_%g_rep_%d_power/" % (phi0, m, delta, epsilon0, epsilon, rep)
+    fname = fname.replace(".","_")    
+    df = spark.createDataFrame(zip(phi_arr, power_arr, noanswer_arr), schema=['phi','power', 'noanswer'])
+    df.coalesce(1).write.mode("overwrite").format('com.databricks.spark.csv').options(header='true').save(fname)
+    
+
+def run_test(phi0, m, delta, epsilon0, epsilon ,repetitions, partitions):
+
+
+    pi0 = range(1, m + 1)
+    power_arr = []
+    phi_arr = []
+    noanswer_arr = []
+    test_fixed_confidence = SimpleFixedConfidence(pi0, phi0, delta, epsilon0, epsilon, debug=False)
+    sampcomp = test_fixed_confidence.get_sample_num()
+    print("Running: phi0_%g_m_%d_delta_%g_eps0_%g_eps_%g_rep_%d" % (phi0, m, delta, epsilon0, epsilon, repetitions))
+    print("samp comp: %d" % (sampcomp))
+
+    # right
+    test_anymore = True
+    step = 0.005
+    for phi in np.arange(phi0,1.0,step):
+        if (test_anymore):            
+            if (phi <= phi0 + epsilon0-2*step):
+                power = 0
+                noanswer = 0
+            else:
+                #model = Mallows(pi0, phi)
+                #[power, noanswer] = get_power(test_fixed_confidence, model, repetitions)
+                [power, noanswer] = get_power(test_fixed_confidence, pi0, phi, repetitions, partitions)
+                print("phi: %f\tphi_0: %f\tpower: %f, noanswer: %g" % (phi, phi0, power, noanswer))
+        else:
+            power = 1.0
+
+        phi_arr.append(float(phi))
+        power_arr.append(float(power))
+        noanswer_arr.append(float(noanswer))
+
+        if ((power > 0.99) & (noanswer < 0.01)):
+            test_anymore = False
+
+        save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+
+    # left
+    test_anymore = True
+    for phi in np.arange(phi0-0.005,0.0,-0.005):
+        if (test_anymore):
+            if (phi >= phi0 - epsilon0+2*step):
+                power = 0
+                noanswer = 0
+            else:            
+                #model = Mallows(pi0, phi)
+                #[power, noanswer] = get_power_parallel(test_fixed_confidence, model, repetitions)
+                [power, noanswer] = get_power(test_fixed_confidence, pi0, phi, repetitions, partitions)
+                print("phi: %f\tphi_0: %f\tpower: %f, noanswer: %g" % (phi, phi0, power, noanswer))
+        else:
+            power = 1.0
+        phi_arr.insert(0,float(phi))
+        power_arr.insert(0,float(power))
+        noanswer_arr.insert(0,float(noanswer))
+
+        if ((power>0.99) & (noanswer<0.01)):
+            test_anymore = False
+
+        save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+    #return phi_arr, power_arr, noanswer_arr
+    save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+
+    
+def run_test_finegrained(phi0, m, delta, epsilon0, epsilon ,repetitions, partitions):
+
+
+
+    pi0 = range(1, m + 1)
+    power_arr = []
+    phi_arr = []
+    noanswer_arr = []
+    test_fixed_confidence = SimpleFixedConfidence(pi0, phi0, delta, epsilon0, epsilon, debug=False)
+    sampcomp = test_fixed_confidence.get_sample_num()
+    print("Running: phi0_%g_m_%d_delta_%g_eps0_%g_eps_%g_rep_%d" % (phi0, m, delta, epsilon0, epsilon, repetitions))
+    print("samp comp: %d" % (sampcomp))
+    print("H_0: [%g,%g]" % (phi0-epsilon0,phi0+epsilon0))
+
+    # right
+    test_anymore = True
+    step = 0.0005
+    for phi in np.arange(phi0,1.0,step):
+        threshold = (np.sqrt(m) / 4.0) * np.log( (phi- 3 * step) / (phi0 + epsilon0))
+        if (test_anymore):
+            if (test_anymore):
+                if (phi <= phi0 + epsilon0 - step):
+                    power = 0
+                    noanswer = 0
+                    print("-1> phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+                elif ((phi >= phi0 + epsilon0 + 3 * step) and (threshold  < epsilon)):
+                    power = 0
+                    noanswer = 1
+                    print("-2> phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+                else:
+                    #[power, noanswer] = get_power(test_fixed_confidence, model, repetitions)
+                    #[power, noanswer] = get_power_parallel(test_fixed_confidence, pi0, phi, repetitions)
+                    [power, noanswer] = get_power(test_fixed_confidence, pi0, phi, repetitions, partitions)
+                    print("phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+        else:
+            power = 1.0
+            noanswer = 0.0
+
+        phi_arr.append(float(phi))
+        power_arr.append(float(power))
+        noanswer_arr.append(float(noanswer))
+
+        if ((power > 0.99) & (noanswer < 0.01)):
+            test_anymore = False
+
+        #save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+
+    # left
+    test_anymore = True
+    for phi in np.arange(phi0,0.0,-step):
+        threshold = (np.sqrt(m) / 4.0) * np.log((phi0 -epsilon0) / (phi-3*step))
+        if (test_anymore):
+            if (phi >= phi0 - epsilon0 + step):
+                power = 0
+                noanswer = 0
+                print("-1> phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+            elif ((phi <= phi0 - epsilon0 - 3 * step) and (threshold < epsilon)):
+                power = 0
+                noanswer = 1
+                print("-2> phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+            else:
+                #[power, noanswer] = get_power_parallel(test_fixed_confidence, model, repetitions)
+                #[power, noanswer] = get_power_parallel(test_fixed_confidence, pi0, phi, repetitions)
+                [power, noanswer] = get_power(test_fixed_confidence, pi0, phi, repetitions, partitions)
+                print("phi: %f\tpower: %f, noanswer: %g" % (phi, power, noanswer))
+        else:
+            power = 1.0
+            noanswer = 0.0
+
+        phi_arr.insert(0,float(phi))
+        power_arr.insert(0,float(power))
+        noanswer_arr.insert(0,float(noanswer))
+
+        if ((power>0.99) & (noanswer<0.01)):
+            test_anymore = False
+
+        #save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+
+    save_power_curve(phi_arr, power_arr, noanswer_arr, phi0, m, delta, epsilon0, epsilon, repetitions)
+
+    
+
+m = 5
+pi0 = range(1, m + 1)
+phi = 0.6
+phi0 = 0.0
+delta = 0.05
+epsilon0=0.2
+epsilon = 0.1
+rankings = []
+m = Mallows(pi0, phi)
+test_fixed_confidence = SimpleFixedConfidence(pi0, phi0, delta, epsilon0, epsilon, debug=True)
+sampcomp = test_fixed_confidence.get_sample_num()
+print("samp comp: %d" % (sampcomp))
+
+
+def get_stat( rankings, central_ranking):
+    s = 0.0
+    M = len(rankings[0])
+    for r in rankings:
+        s = s+kendall_tau(central_ranking, r)
+
+    s = s / len(rankings) # sufficient stat
+    return s
+
+rankings = []
+for i in range(test_fixed_confidence.get_sample_num()):
+    r = m.get_sample()
+    rankings.append(r)
+    
+    
+s = get_stat( rankings, pi0)
+print(test_fixed_confidence.test(s))
+
+
+m=5
+pi0 = range(1, m + 1)
+phi = 0.6
+num = 100000    
+mul =10
+
+data = getDFWithRandomRanking(num,pi0, phi)
+data.sample(fraction=1/mul).count()
+d = data.sample(fraction=1/mul).agg(func.avg("distance").alias("avg_dist")).collect()
+print(d[0].avg_dist)
+
+
+m = 40
+phi0 = 0.5
+delta = 0.05
+repetitions = 4
+epsilon0 = 0.05
+epsilon = 0.01
+
+
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+
+
+m = 40
+
+delta = 0.05
+repetitions = 20
+epsilon0 = 0.025
+
+phi0 = 0.1
+epsilon = 0.01
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+epsilon = 0.05
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+
+phi0 = 0.5
+epsilon = 0.01
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+epsilon = 0.05
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+
+phi0 = 0.7
+epsilon = 0.01
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+epsilon = 0.05
+run_test(phi0, m, delta, epsilon0, epsilon, repetitions, 200)
+
+
+m = 10
+machine = 200
+delta = 0.05
+repetitions = 20
+epsilon0 = 0.025
+
+phi0 = 0.1
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.5
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.7
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.9
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+
+
+
+m = 15
+machine = 200
+delta = 0.05
+repetitions = 20
+epsilon0 = 0.025
+
+phi0 = 0.1
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.5
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.7
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+phi0 = 0.9
+epsilon = 0.00
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+epsilon = 0.05
+run_test_finegrained(phi0, m, delta, epsilon0, epsilon, repetitions, machine)
+
+
